@@ -1,200 +1,29 @@
-# Préparation----
-library(httr)
-library(rvest)
-library(purrr)
-
-url <- "https://www.anime-planet.com/anime/all?page="
-
-les_pages <- function(url,num) {
-  return(paste0(url,num))
-}
-
-urls <- map2(url,1:530,les_pages)
-
-collect_lien <- function(urls) {
-  page <- read_html(urls)
-  
-  liens <- 
-    page %>% 
-    html_nodes("li.card a") %>% 
-    html_attr("href") %>% 
-    url_absolute("https://www.anime-planet.com/anime")
-  
-  Sys.sleep(3)
-  
-  return(liens)
-}
-
-res <- map(urls,collect_lien)
-
-resultat <- flatten(res)
-
-resultat
-
-save(resultat,res,url,file="liste_anime_planet.Rda")
-
-url2 <- "https://www.anime-planet.com/anime/only-yesterday"
-
-i = 1
-
-collect_data <- function(url2) {
-  page2 <- read_html(url2)
-  
-  nom <- 
-    page2 %>% 
-    html_node("h1") %>% 
-    html_text2()
-  
-  format <-
-    page2 %>% 
-    html_node("span.type") %>% 
-    html_text2()
-  
-  studio <-
-    page2 %>% 
-    html_node("div.md-1-5:nth-child(2)") %>% 
-    html_text2()
-  
-  annee <-
-    page2 %>% 
-    html_node("span.iconYear") %>% 
-    html_text2()
-  
-  vote <-
-    page2 %>% 
-    html_node(".avgRating > span:nth-child(1)") %>% 
-    html_text2()
-  
-  rang <-
-    page2 %>% 
-    html_node("div.pure-1:nth-child(5)") %>% 
-    html_text2()
-  
-  tags <-
-    page2 %>% 
-    html_nodes("div.tags:nth-child(2)") %>% 
-    html_text2() %>% 
-    stringr::str_remove_all("Tags\n") %>% 
-    stringr::str_replace_all("\n",";")
-  
-  anime <- tibble::tibble(nom=nom,
-                      format=format,
-                      studio=studio,
-                      annee=annee,
-                      vote=vote,
-                      rang=rang,
-                      tags=tags[1],
-                      lien=url2)
-  
-  text <- paste(i, "sur 18'519")
-  
-  print(text)
-  
-  i <<- i+1
-  
-  Sys.sleep(3)
-  
-  return(anime)
-}
-
-tagz <- function(l) {
-  p <- read_html(l) 
-  
-  tags2 <-
-    p %>% 
-    html_nodes("div.tags") %>% 
-    html_text2() %>% 
-    stringr::str_remove_all("Tags\n") %>% 
-    stringr::str_replace_all("\n",";")
-  
-  a <- tibble::tibble(tags2=tags2,lien=l)
-  
-  text <- paste(i, "sur 5'582")
-  
-  print(text)
-  
-  i <<- i+1
-  
-  Sys.sleep(3)
-  
-  return(a)
-}
-
-# Collecte-----
-i = 1
-
-manga_genre <- map_dfr(resultat,collect_data)
-
-library(dplyr)
-
-liens_tags <-
-  manga_genre %>% 
-  filter(is.na(tags)) %>% 
-  pull(lien)
-
-i = 1
-
-tags2 <- map_dfr(liens_tags,tagz)
-
-manga_genre <- left_join(manga_genre,tags2)
-
-manga_genre <-
-  manga_genre %>% 
-  mutate(tags = ifelse(is.na(tags),tags2,tags)) %>% 
-  select(-tags2)
-
-save(manga_genre,file="manga_genre.Rda")
-
-# Nettoyage-----
+# Librairies----
 library(stringr)
 library(tidyr)
-
-mangas <- 
-  manga_genre %>% 
-  separate(col=format,into=c("format","episodes") ,sep=" \\(") %>%
-  separate(col=vote,into=c("note","out","of","n5","from",
-                           "popularite","votes"),
-           sep=" ") %>% 
-  select(-out,-of,-n5,-from,-votes) %>% 
-  mutate(annee = str_replace_all(annee,"(\\d{4}).*","\\1"),
-         annee = as.numeric(annee),
-         episodes = str_replace_all(episodes,"(\\d{1,4}).*","\\1"),
-         episodes = as.numeric(episodes),
-         note = as.numeric(note),
-         popularite = as.numeric(str_remove_all(popularite,",")),
-         rang = str_remove_all(rang,"Rank \\#"),
-         rang = str_remove_all(rang,","),
-         rang = as.numeric(rang),
-         tags = tolower(tags))
-  
-mangas <-
-  mangas %>% 
-  mutate(episodes = ifelse(is.na(episodes),1,episodes),
-         annee = ifelse(is.na(annee),2023,annee),
-         popularite = ifelse(is.na(popularite),note,popularite),
-         note = ifelse(is.na(popularite),2.5,note),
-         rang = ifelse(is.na(rang),15378,rang)) %>% 
-  distinct() %>% 
-  mutate(periode = case_when(
-    annee %in% 1907:2001 ~ "1907-2001",
-    annee %in% 2002:2011 ~ "2002-2011",
-    annee %in% 2012:2016 ~ "2012-2016",
-    annee %in% 2017:2023 ~ "2017-2023"
-  ))
-
-save(mangas,file="mangas_clean.Rda")
-
-mangas_tags <- 
-  mangas %>% 
-  separate_rows(tags,sep=";") %>% 
-  mutate(tags = str_remove_all(tags,","))
-
-save(mangas_tags,file="mangas_tags.Rda")
-
-# Analyse-----
 library(ggplot2)
+library(widyr)
+
+# Données----
+load("MyData/mangas_clean.Rda")
+load("MyData/mangas_tags.Rda")
+
+# Corrélation entre les tags
+mangas_corr <-
+  mangas_tags %>% 
+  group_by(annee) %>% 
+  count(tags) %>% 
+  pairwise_cor(tags,annee,n)
+
+# Co-occurrence entre les tags
+mangas_cooc <- 
+  mangas_tags %>% 
+  pairwise_cor(tags,nom)
+
+# Préparation----
 theme_set(theme_bw())
 
+# Analyse-----
 # Évolution du nombre d'animes
 mangas %>% 
   filter(!str_detect(tags,"content"),
@@ -225,7 +54,7 @@ mangas_tags %>%
        subtitle="Toute année confondue",
        x=NULL, y=NULL)
 
-# # Top 10: Genre les plus courants par période
+# Top 10: Genre les plus courants par période
 mangas_tags %>%
   drop_na() %>% 
   mutate(annee = case_when(
@@ -314,14 +143,6 @@ mangas_tags %>%
   labs(title="Évolution de la part des quatre genres classiques",
        x=NULL, y=NULL, fill="Genre")
 
-library(widyr)
-
-mangas_corr <-
-  mangas_tags %>% 
-  group_by(annee) %>% 
-  count(tags) %>% 
-  pairwise_cor(tags,annee,n)
-
 # Corrélation des tags selon leur évolution pour les 4 genres classiques
 mangas_corr %>% 
   filter(item1 %in% c("shounen","shoujo","seinen","josei")) %>%
@@ -339,10 +160,6 @@ mangas_corr %>%
   theme(legend.position = "none") +
   labs(title="Les tags les plus corrélés aux quatre genres d'animes classiques",
        x=NULL, y=NULL)
-
-mangas_cooc <- 
-  mangas_tags %>% 
-  pairwise_cor(tags,nom)
 
 # Corrélation (concurrence) des tags avec les 4 genres classiques
 mangas_cooc %>% 
@@ -435,13 +252,3 @@ mangas %>%
   labs(title="Évolution du nombre de studios d'animation",
        subtitle="Pic 2021 (255)",
        x=NULL, y=NULL)
-
-  
-
-
-
-
-
-
-
-  

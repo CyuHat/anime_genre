@@ -10,14 +10,16 @@ knitr::opts_chunk$set(echo = TRUE, fig.width = 9, fig.height = 6)
 ```
 
 ```{r}
-library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
 library(widyr)
 ```
 
 ```{r}
-load("manga_genre.Rda")
-load("mangas_clean.Rda")
-load("mangas_tags.Rda")
+load("MyData/mangas_clean.Rda")
+load("MyData/mangas_tags.Rda")
 ```
 
 ```{r}
